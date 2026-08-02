@@ -1,0 +1,20 @@
+# Install torch/torchvision from the CUDA 12.8 index first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# (the cu121 index in the original plan has no Python 3.14 wheels)
+numpy
+pandas
+scikit-learn
+scikit-image
+matplotlib
+rasterio
+geopandas
+shapely
+xgboost
+torch
+torchvision
+earthengine-api
+pyyaml
+pytest
+tqdm
+requests
+pyarrow

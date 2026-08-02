@@ -1,0 +1,24 @@
+# Environments
+.venv/
+__pycache__/
+*.pyc
+
+# Data (large, regenerable, not versioned)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+data/external/*
+!data/external/.gitkeep
+
+# Reference PDFs (large binaries; keep the .md notes)
+papers/*.pdf
+
+# Results
+results/figures/*
+results/logs/*
+!results/figures/.gitkeep
+!results/logs/.gitkeep
+
+# Editors
+.ipynb_checkpoints/
