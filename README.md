@@ -1,6 +1,10 @@
 # Spatial Context vs. Spectral Signatures
 ### A CNN Benchmark for Solar PV Detection in Japan
 
+[![tests](https://github.com/jxlianbr/cnn-cv-detection/actions/workflows/tests.yml/badge.svg)](https://github.com/jxlianbr/cnn-cv-detection/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Does a CNN using spatial context detect solar PV better than a pixel-wise
 spectral classifier? This replicates the spectral-index/XGBoost baseline of
 Shimada & Takeuchi (2025) for Japan, trains a from-scratch CNN patch classifier
@@ -102,6 +106,12 @@ results/       gitignored; figures and logs
 ```bash
 python -m pytest tests/ -q
 ```
+
+## License
+
+MIT -- see [LICENSE](LICENSE). Note this covers the code only. The PV polygon
+dataset is redistributed by Zenodo under its own terms, and the papers under
+`papers/` are not part of this repository.
 
 ## Reference
 
