@@ -1,4 +1,6 @@
-gee_project_id: "ee-brodnow77"
+# Set the GEE_PROJECT_ID environment variable to your own Earth Engine
+# project; it overrides this placeholder.
+gee_project_id: "ee-YOUR-PROJECT-ID"
 sentinel2:
   start_date: "2022-09-01"
   end_date: "2022-11-30"

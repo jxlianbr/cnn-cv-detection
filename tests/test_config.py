@@ -1,4 +1,53 @@
+import pytest
 from src.config import load_config
+
+_MINIMAL_YAML = """
+gee_project_id: "ee-YOUR-PROJECT-ID"
+sentinel2:
+  start_date: "2022-09-01"
+  end_date: "2022-11-30"
+  bands: [B2, B3, B4, B8, B11, B12]
+xgboost: {max_depth: 8, eta: 0.01717, n_estimators: 1000}
+sampling:
+  n_sampling_squares: 1000
+  pv_squares: 600
+  buffer_squares: 300
+  urban_squares: 100
+  buffer_km: 7
+patch: {size_px: 21}
+aoi: {name: "japan", bbox: [129.0, 31.0, 146.0, 46.0]}
+split: {test_fraction: 0.2, val_fraction: 0.2, block_size_km: 10, seed: 42}
+paths:
+  pv_polygons: "data/external/pv_polygons.gpkg"
+  processed_dir: "data/processed"
+"""
+
+
+@pytest.fixture
+def minimal_config(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(_MINIMAL_YAML)
+    return path
+
+
+def test_load_config_prefers_the_gee_project_id_from_the_environment(
+        minimal_config, monkeypatch):
+    # the committed config carries a placeholder so no personal cloud project
+    # id is published; a real run supplies the id out of band
+    monkeypatch.setenv("GEE_PROJECT_ID", "ee-someones-real-project")
+
+    cfg = load_config(minimal_config)
+
+    assert cfg.gee_project_id == "ee-someones-real-project"
+
+
+def test_load_config_falls_back_to_the_yaml_value_when_env_is_unset(
+        minimal_config, monkeypatch):
+    monkeypatch.delenv("GEE_PROJECT_ID", raising=False)
+
+    cfg = load_config(minimal_config)
+
+    assert cfg.gee_project_id == "ee-YOUR-PROJECT-ID"
 
 
 def test_load_config_returns_expected_fields(tmp_path):

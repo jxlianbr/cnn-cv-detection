@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Data (large, regenerable, not versioned)
 data/raw/*
@@ -11,9 +12,9 @@ data/processed/*
 data/external/*
 !data/external/.gitkeep
 
-# Reference PDFs (large binaries; keep the .md notes)
+# Reference PDFs and Notes
 papers/*.pdf
-
+paper/*.md
 # Results
 results/figures/*
 results/logs/*
@@ -22,3 +23,9 @@ results/logs/*
 
 # Editors
 .ipynb_checkpoints/
+
+# vendored third-party agent skills, not part of this project
+.agents/
+
+# unpublished thesis material
+reports/

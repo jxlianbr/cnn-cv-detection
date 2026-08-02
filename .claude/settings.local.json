@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p data/raw data/processed data/external notebooks src/data src/models src/evaluation configs results/figures results/logs reports)",
+      "Bash(touch data/raw/.gitkeep data/processed/.gitkeep data/external/.gitkeep notebooks/.gitkeep results/figures/.gitkeep results/logs/.gitkeep)",
+      "Bash(cd *)",
+      "WebSearch",
+      "Bash(curl -fsSL \"https://arxiv.org/pdf/1704.06410\" -o arxiv-1704.06410-mpcnn-fusion.pdf)",
+      "Bash(curl -fsSL \"https://arxiv.org/pdf/1607.06029\" -o arxiv-1607.06029-malof-cnn.pdf)",
+      "Bash(curl -fsSL \"https://arxiv.org/pdf/1910.13509\" -o arxiv-1910.13509-rooftop-cnn.pdf)",
+      "Bash(curl -fsSL \"https://cs231n.stanford.edu/2024/papers/solar-panel-detection-on-satellite-images-from-faster-r-cnn-to-y.pdf\" -o stanford-cs231n-fastercnn-yolov10.pdf)",
+      "Bash(curl -fsSL \"https://www.nature.com/articles/s41597-023-02539-8.pdf\" -o s41597-023-02539-8-vhr-sdg-dataset.pdf)",
+      "Bash(curl -fsSL \"https://www.nature.com/articles/s41597-025-04985-y.pdf\" -o s41597-025-04985-y-global-pv-2019-2022.pdf)",
+      "PowerShell(Get-ChildItem -Force D:\\\\SCIENCE\\\\CNN | Select-Object Mode,Name; Write-Output \"--- python ---\"; python --version; Write-Output \"--- git ---\"; git --version)"
+    ]
+  }
+}

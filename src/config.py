@@ -1,7 +1,10 @@
 from __future__ import annotations
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import yaml
+
+GEE_PROJECT_ENV_VAR = "GEE_PROJECT_ID"
 
 
 @dataclass
@@ -68,7 +71,9 @@ def load_config(path: str | Path = "configs/config.yaml") -> Config:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     return Config(
-        gee_project_id=raw["gee_project_id"],
+        # the committed config holds a placeholder so no personal cloud project
+        # id ends up in version control; set GEE_PROJECT_ID to run for real
+        gee_project_id=os.environ.get(GEE_PROJECT_ENV_VAR) or raw["gee_project_id"],
         sentinel2=Sentinel2Config(**raw["sentinel2"]),
         xgboost=XGBoostConfig(**raw["xgboost"]),
         sampling=SamplingConfig(**raw["sampling"]),
