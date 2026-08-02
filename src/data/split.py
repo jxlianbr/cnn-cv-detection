@@ -27,3 +27,21 @@ def spatial_train_test_split(gdf: gpd.GeoDataFrame, test_fraction: float,
 
     is_test = blocks.isin(test_block_set)
     return gdf[~is_test], gdf[is_test]
+
+
+def spatial_train_val_test_split(gdf: gpd.GeoDataFrame, test_fraction: float,
+                                 val_fraction: float, block_size_km: float, seed: int
+                                 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Three-way block split. Both fractions are shares of the *whole* dataset,
+    so (0.2, 0.2) gives roughly 60/20/20.
+
+    The test split is carved off first and never touched by the training
+    scripts, leaving it clean for the final Results-chapter numbers; val is
+    then carved out of what remains, for model selection. Applying the same
+    whole-block assignment at each stage keeps all three mutually
+    block-disjoint, which is what prevents patch leakage between them.
+    """
+    train_pool, test = spatial_train_test_split(gdf, test_fraction, block_size_km, seed)
+    val_share_of_pool = val_fraction / (1.0 - test_fraction)
+    train, val = spatial_train_test_split(train_pool, val_share_of_pool, block_size_km, seed + 1)
+    return train, val, test

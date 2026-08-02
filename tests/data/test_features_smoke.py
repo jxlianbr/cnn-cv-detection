@@ -20,14 +20,17 @@ def main():
     aoi = ee.Geometry.Rectangle([139.6, 35.5, 139.8, 35.7])
     composite = get_autumn_2022_composite(aoi, cfg.sentinel2)
     points = gpd.GeoDataFrame(
-        {"geometry": [Point(139.70, 35.60), Point(139.75, 35.65)]}, crs="EPSG:4326"
+        {"point_id": [0, 1],
+         "label": ["pv", "non_pv"],
+         "geometry": [Point(139.70, 35.60), Point(139.75, 35.65)]}, crs="EPSG:4326"
     )
-    band_values = sample_band_values_at_points(composite, points, cfg.sentinel2.bands)
+    band_values, kept = sample_band_values_at_points(composite, points, cfg.sentinel2.bands)
     print(band_values)
-    labels = ["pv", "non_pv"]
-    features = build_feature_matrix(band_values, pd.Series(labels))
+    print(f"{len(kept)}/{len(points)} points survived masking")
+    features = build_feature_matrix(band_values, kept["label"])
     print(features)
     assert not features.isna().any().any(), "feature matrix contains NaNs"
+    assert len(features) == len(kept), "feature rows must match surviving points"
 
 
 if __name__ == "__main__":

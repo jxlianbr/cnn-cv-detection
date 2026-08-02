@@ -1,7 +1,7 @@
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
-from src.data.split import spatial_train_test_split
+from src.data.split import spatial_train_test_split, spatial_train_val_test_split, _block_id
 
 
 def _grid_points_gdf(n_per_side=20, spacing_deg=0.01):
@@ -47,3 +47,36 @@ def test_split_points_in_same_small_neighborhood_stay_together():
     both_in_train = 0 in train.index and 1 in train.index
     both_in_test = 0 in test.index and 1 in test.index
     assert both_in_train or both_in_test
+
+
+def _blocks_of(gdf, block_size_km):
+    return {_block_id(p.x, p.y, block_size_km) for p in gdf.geometry}
+
+
+def test_three_way_split_shares_no_block_between_any_two_splits():
+    gdf = _grid_points_gdf(n_per_side=30)
+    train, val, test = spatial_train_val_test_split(
+        gdf, test_fraction=0.2, val_fraction=0.2, block_size_km=5, seed=0)
+
+    train_b, val_b, test_b = (_blocks_of(g, 5) for g in (train, val, test))
+    assert train_b.isdisjoint(val_b)
+    assert train_b.isdisjoint(test_b)
+    assert val_b.isdisjoint(test_b)
+
+
+def test_three_way_split_partitions_every_point_exactly_once():
+    gdf = _grid_points_gdf(n_per_side=30)
+    train, val, test = spatial_train_val_test_split(
+        gdf, test_fraction=0.2, val_fraction=0.2, block_size_km=5, seed=0)
+
+    assert len(train) + len(val) + len(test) == len(gdf)
+    assert set(train.index) | set(val.index) | set(test.index) == set(gdf.index)
+
+
+def test_three_way_split_gives_each_split_a_nonempty_share():
+    gdf = _grid_points_gdf(n_per_side=30)
+    train, val, test = spatial_train_val_test_split(
+        gdf, test_fraction=0.2, val_fraction=0.2, block_size_km=5, seed=0)
+
+    assert len(test) > 0 and len(val) > 0
+    assert len(train) > len(val)  # train must remain the majority share

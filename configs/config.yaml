@@ -15,5 +15,19 @@ sampling:
   buffer_km: 7
 patch:
   size_px: 21
+aoi:
+  # Pilot region: northern Kanto plain. Chosen empirically -- 8398 of the
+  # 104471 released PV polygons have centroids inside it, so the pv stratum is
+  # well populated without committing to the full Japan bbox
+  # ([129.0, 31.0, 146.0, 46.0]), which is ~600 GB of imagery at 10 m.
+  name: "kanto_pilot"
+  bbox: [139.5, 35.8, 140.5, 36.5]
+split:
+  # both are shares of the whole sample, i.e. roughly a 60/20/20 partition
+  test_fraction: 0.2   # held out entirely; not read by the training scripts
+  val_fraction: 0.2    # used for model selection
+  block_size_km: 10
+  seed: 42
 paths:
   pv_polygons: "data/external/pv_polygons.gpkg"
+  processed_dir: "data/processed"

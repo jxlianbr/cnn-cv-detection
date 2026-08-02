@@ -25,6 +25,22 @@ def test_compute_metrics_returns_all_expected_keys():
     }
 
 
+def test_compute_metrics_reports_nan_auc_for_single_class_split_instead_of_raising():
+    # A small block-based split can land entirely in one class. ROC-AUC is
+    # undefined there; sklearn currently warns and returns NaN rather than
+    # raising, so a run does not abort after training completes. This pins that
+    # behaviour -- if a future sklearn goes back to raising, the final scripts
+    # would crash at the last step and this test catches it here instead.
+    y_true = np.array([0, 0, 0, 0])
+    y_pred = np.array([0, 0, 1, 0])
+    y_proba = np.array([0.1, 0.2, 0.7, 0.3])
+
+    m = compute_metrics(y_true, y_pred, y_proba)
+
+    assert np.isnan(m["roc_auc"])
+    assert m["overall_accuracy"] == 0.75
+
+
 def test_compute_metrics_matches_published_baseline_ballpark():
     # Sanity check against the published benchmark
     # (OA 0.984, P 0.999, R 0.969, F1 0.984, Kappa 0.968, ROC-AUC 0.9497)

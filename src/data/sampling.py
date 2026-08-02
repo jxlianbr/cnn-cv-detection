@@ -46,13 +46,31 @@ def generate_sampling_squares(pv_gdf: gpd.GeoDataFrame, populated_buffer_gdf: gp
 
 
 def _random_points_in_polygon(poly, n: int, rng: np.random.Generator) -> list[Point]:
-    minx, miny, maxx, maxy = poly.bounds
+    """Rejection-sample n points inside `poly`, which is typically a
+    MultiPolygon of scattered installations.
+
+    Sampling from the bounding box of the *whole* geometry does not scale: real
+    PV polygons are spread across the AOI, so that box is orders of magnitude
+    larger than the polygons in it and virtually every draw is rejected. Picking
+    a part first (weighted by area, which keeps the sample spatially unbiased)
+    and drawing inside that part's own box keeps the acceptance rate high
+    however far apart the parts are.
+    """
+    parts = [g for g in (poly.geoms if hasattr(poly, "geoms") else [poly]) if g.area > 0]
+    if not parts:
+        return []
+    areas = np.array([g.area for g in parts], dtype=float)
+    weights = areas / areas.sum()
+    bounds = [g.bounds for g in parts]
+
     points = []
     attempts = 0
     max_attempts = n * 2000
     while len(points) < n and attempts < max_attempts:
+        i = rng.choice(len(parts), p=weights)
+        minx, miny, maxx, maxy = bounds[i]
         p = Point(rng.uniform(minx, maxx), rng.uniform(miny, maxy))
-        if poly.contains(p):
+        if parts[i].contains(p):
             points.append(p)
         attempts += 1
     return points

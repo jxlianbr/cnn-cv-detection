@@ -33,8 +33,23 @@ class PatchConfig:
 
 
 @dataclass
+class AOIConfig:
+    name: str
+    bbox: list[float]  # [west, south, east, north] in EPSG:4326
+
+
+@dataclass
+class SplitConfig:
+    test_fraction: float
+    val_fraction: float
+    block_size_km: float
+    seed: int
+
+
+@dataclass
 class PathsConfig:
     pv_polygons: str
+    processed_dir: str
 
 
 @dataclass
@@ -44,6 +59,8 @@ class Config:
     xgboost: XGBoostConfig
     sampling: SamplingConfig
     patch: PatchConfig
+    aoi: AOIConfig
+    split: SplitConfig
     paths: PathsConfig
 
 
@@ -56,5 +73,7 @@ def load_config(path: str | Path = "configs/config.yaml") -> Config:
         xgboost=XGBoostConfig(**raw["xgboost"]),
         sampling=SamplingConfig(**raw["sampling"]),
         patch=PatchConfig(**raw["patch"]),
+        aoi=AOIConfig(**raw["aoi"]),
+        split=SplitConfig(**raw["split"]),
         paths=PathsConfig(**raw["paths"]),
     )
