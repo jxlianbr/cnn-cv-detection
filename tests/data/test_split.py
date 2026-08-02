@@ -1,7 +1,9 @@
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
-from src.data.split import spatial_train_test_split, spatial_train_val_test_split, _block_id
+from src.data.split import (
+    spatial_train_test_split, spatial_train_val_test_split, block_holdout_mask, _block_id,
+)
 
 
 def _grid_points_gdf(n_per_side=20, spacing_deg=0.01):
@@ -47,6 +49,49 @@ def test_split_points_in_same_small_neighborhood_stay_together():
     both_in_train = 0 in train.index and 1 in train.index
     both_in_test = 0 in test.index and 1 in test.index
     assert both_in_train or both_in_test
+
+
+def test_block_holdout_mask_holds_out_roughly_the_requested_share():
+    gdf = _grid_points_gdf(n_per_side=30)
+    lon = gdf.geometry.x.values
+    lat = gdf.geometry.y.values
+
+    mask = block_holdout_mask(lon, lat, holdout_fraction=0.2, block_size_km=5, seed=0)
+
+    assert 0.1 < mask.mean() < 0.35  # blocky split won't hit exactly 20%
+
+
+def test_block_holdout_mask_keeps_a_whole_block_on_one_side():
+    # an early-stopping slice drawn at random would put near-neighbours of the
+    # fitting points into the stopping set, which is the leak being closed
+    gdf = _grid_points_gdf(n_per_side=30)
+    lon = gdf.geometry.x.values
+    lat = gdf.geometry.y.values
+
+    mask = block_holdout_mask(lon, lat, holdout_fraction=0.3, block_size_km=5, seed=1)
+
+    by_block = {}
+    for l0, l1, m in zip(lon, lat, mask):
+        by_block.setdefault(_block_id(l0, l1, 5), set()).add(bool(m))
+    assert all(len(v) == 1 for v in by_block.values())
+
+
+def test_block_holdout_mask_is_deterministic_given_seed():
+    gdf = _grid_points_gdf(n_per_side=20)
+    lon, lat = gdf.geometry.x.values, gdf.geometry.y.values
+    a = block_holdout_mask(lon, lat, 0.2, 5, seed=3)
+    b = block_holdout_mask(lon, lat, 0.2, 5, seed=3)
+    assert (a == b).all()
+
+
+def test_block_holdout_mask_always_leaves_points_on_both_sides():
+    # a tiny training subset must still yield a usable stopping set
+    gdf = _grid_points_gdf(n_per_side=4)
+    lon, lat = gdf.geometry.x.values, gdf.geometry.y.values
+
+    mask = block_holdout_mask(lon, lat, holdout_fraction=0.2, block_size_km=50, seed=0)
+
+    assert 0 < mask.sum() < len(mask)
 
 
 def _blocks_of(gdf, block_size_km):

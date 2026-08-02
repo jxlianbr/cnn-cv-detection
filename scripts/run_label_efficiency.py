@@ -13,12 +13,15 @@ from torch.utils.data import DataLoader
 from src.config import XGBoostConfig
 from src.models.xgboost_baseline import train_baseline, predict_proba, FEATURE_COLUMNS
 from src.data.patch_dataset import PVPatchDataset
+from src.data.split import block_holdout_mask
 from src.models.cnn import PVPatchCNN
 from src.models.train_cnn import train_cnn, evaluate_cnn
 from src.evaluation.metrics import compute_metrics
 
 
 METRIC_COLUMNS = ["overall_accuracy", "precision", "recall", "f1", "kappa", "roc_auc"]
+EARLY_STOP_FRACTION = 0.2
+EARLY_STOP_BLOCK_KM = 10
 
 
 def subset_indices_for_repeats(n_total: int, fraction: float, seed: int,
@@ -64,13 +67,28 @@ def run_label_efficiency_curve(train_df, train_patches, train_labels,
                          **compute_metrics(val_true, val_pred, val_proba)})
 
             # --- CNN ---
+            # Early stopping must not watch `val`: choosing the stopping epoch
+            # by val loss and then scoring on val would hand the CNN an
+            # advantage the baseline never gets. The stopping slice is carved
+            # out of this repeat's own training subset, blockwise.
+            subset = train_df.iloc[idx]
+            stop_mask = block_holdout_mask(
+                subset["lon"].values, subset["lat"].values,
+                holdout_fraction=EARLY_STOP_FRACTION,
+                block_size_km=EARLY_STOP_BLOCK_KM, seed=seed + repeat)
+            fit_idx, stop_idx = idx[~stop_mask], idx[stop_mask]
+
             train_loader = DataLoader(
-                PVPatchDataset(train_patches[idx], train_labels[idx]),
+                PVPatchDataset(train_patches[fit_idx], train_labels[fit_idx]),
                 batch_size=16, shuffle=True,
+            )
+            stop_loader = DataLoader(
+                PVPatchDataset(train_patches[stop_idx], train_labels[stop_idx]),
+                batch_size=16, shuffle=False,
             )
             cnn_model = PVPatchCNN(in_channels=train_patches.shape[1],
                                    input_size=train_patches.shape[2])
-            train_cnn(cnn_model, train_loader, val_loader, epochs=cnn_epochs,
+            train_cnn(cnn_model, train_loader, stop_loader, epochs=cnn_epochs,
                       lr=1e-3, device=device, patience=patience)
             rows.append({**tag, "model": "cnn",
                          **evaluate_cnn(cnn_model, val_loader, device=device)})

@@ -37,6 +37,7 @@ from src.data.raster import download_square_geotiff, read_geotiff
 from src.data.sampling import generate_sampling_squares, sample_points_in_squares
 from src.data.sentinel2 import get_autumn_2022_composite
 from src.data.split import spatial_train_val_test_split
+from src.evaluation.failure_cases import attach_pv_polygon_area
 
 _DEG_PER_M = 1.0 / 111_000.0  # crude, but only used to pad a download window
 
@@ -117,6 +118,10 @@ def _extract_patches_per_square(composite, points_gdf, squares_gdf, bands, size_
 
 def _write_split(name: str, features_gdf, patches, out_dir: Path):
     frame = pd.DataFrame(features_gdf.drop(columns="geometry"))
+    # coordinates ride along so downstream code can make its own block-based
+    # splits (e.g. an early-stopping slice) without reopening the geopackage
+    frame["lon"] = features_gdf.geometry.x.values
+    frame["lat"] = features_gdf.geometry.y.values
     rows = features_gdf.index.values
     frame.to_parquet(out_dir / f"{name}_features.parquet", index=False)
     np.save(out_dir / f"{name}_patches.npy", patches[rows].astype(np.float32))
@@ -190,6 +195,11 @@ def main():
         features_gdf, patches, patch_ids)
     aligned_gdf = gpd.GeoDataFrame(aligned_gdf, geometry="geometry", crs=points.crs)
     print(f"Aligned to {len(aligned_gdf)} points with both features and a patch")
+
+    # footprint area per PV point -> the sub-50kW failure-case stratum
+    aligned_gdf = attach_pv_polygon_area(aligned_gdf, pv_gdf)
+    sized = aligned_gdf["polygon_area_m2"].notna().sum()
+    print(f"  {sized} points matched to a PV footprint for capacity sizing")
     if len(aligned_gdf) < 10:
         raise RuntimeError("Too few aligned samples to split; widen the AOI or "
                            "raise --n-pv/--n-nonpv.")

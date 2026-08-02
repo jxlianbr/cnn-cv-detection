@@ -39,6 +39,10 @@ def _synthetic_baseline_df(n, seed):
                       columns=["B2", "B3", "B4", "B8", "B11", "B12", "NDVI", "MNDWI"])
     df["PVSI"] = pvsi
     df["label"] = ["pv"] * n_pv + ["non_pv"] * n_nonpv
+    # spread over many 10km blocks so the early-stopping slice has blocks to
+    # choose from, as it does with real sample points
+    df["lon"] = 139.0 + (np.arange(n) % 20) * 0.12
+    df["lat"] = 36.0 + (np.arange(n) // 20) * 0.12
     return df
 
 

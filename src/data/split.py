@@ -29,6 +29,39 @@ def spatial_train_test_split(gdf: gpd.GeoDataFrame, test_fraction: float,
     return gdf[~is_test], gdf[is_test]
 
 
+def block_holdout_mask(lon: np.ndarray, lat: np.ndarray, holdout_fraction: float,
+                       block_size_km: float, seed: int) -> np.ndarray:
+    """Boolean mask marking whole blocks as held out, from raw coordinates.
+
+    Used to carve an early-stopping slice out of a training set. Doing that at
+    random would put immediate neighbours of the fitting points into the
+    stopping set, so the stopping signal would be partly self-referential; a
+    block split keeps neighbours together. Works on plain arrays because the
+    caller holds a feature frame, not a GeoDataFrame.
+
+    Both sides are guaranteed non-empty as long as more than one block exists.
+    """
+    blocks = [_block_id(x, y, block_size_km) for x, y in zip(lon, lat)]
+    unique_blocks = sorted(set(blocks))
+    rng = np.random.default_rng(seed)
+
+    if len(unique_blocks) < 2:
+        # Everything sits in one block, so there is no spatial structure left to
+        # preserve -- every point is already a neighbour of every other. Fall
+        # back to a point-level split; holding out the sole block would leave
+        # nothing to fit on.
+        n_holdout = min(max(1, int(len(blocks) * holdout_fraction)), len(blocks) - 1)
+        mask = np.zeros(len(blocks), dtype=bool)
+        mask[rng.permutation(len(blocks))[:n_holdout]] = True
+        return mask
+
+    shuffled = rng.permutation(len(unique_blocks))
+    n_holdout = min(max(1, int(len(unique_blocks) * holdout_fraction)),
+                    max(1, len(unique_blocks) - 1))
+    holdout = {unique_blocks[i] for i in shuffled[:n_holdout]}
+    return np.array([b in holdout for b in blocks], dtype=bool)
+
+
 def spatial_train_val_test_split(gdf: gpd.GeoDataFrame, test_fraction: float,
                                  val_fraction: float, block_size_km: float, seed: int
                                  ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame]:
