@@ -34,4 +34,6 @@ jobs:
       - name: Run tests
         # Every test is offline: Earth Engine calls live in the *_smoke.py
         # scripts, which define no test functions and so are never executed.
-        run: python -m pytest tests/ -q
+        # -rs lists skip reasons, so a test skipped for a missing optional
+        # download stays visible instead of quietly vanishing from the count.
+        run: python -m pytest tests/ -q -rs

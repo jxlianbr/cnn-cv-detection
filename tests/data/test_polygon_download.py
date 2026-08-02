@@ -1,11 +1,22 @@
 import geopandas as gpd
+import pytest
 from pathlib import Path
 
 POLYGON_PATH = Path("data/external/pv_polygons.gpkg")
 
+# These two verify the *downloaded dataset*, not this repository's code, so they
+# need a 66 MB file that is gitignored and fetched by
+# scripts/download_pv_polygons.py. Skip rather than fail where it is absent
+# (CI, a fresh clone): a red build for a missing optional download would be
+# noise, and re-downloading it on every CI run would make the suite depend on
+# Zenodo being up.
+pytestmark = pytest.mark.skipif(
+    not POLYGON_PATH.exists(),
+    reason=f"{POLYGON_PATH} not present -- run scripts/download_pv_polygons.py",
+)
+
 
 def test_polygon_file_exists_and_loads():
-    assert POLYGON_PATH.exists(), "run scripts/download_pv_polygons.py first"
     gdf = gpd.read_file(POLYGON_PATH)
     assert len(gdf) > 0
     assert gdf.crs is not None
