@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config import load_config
-from src.data.patch_dataset import PVPatchDataset
+from src.data.patch_dataset import PVPatchDataset, compute_channel_stats
 from src.data.split import block_holdout_mask
 from src.models.cnn import PVPatchCNN
 from src.models.train_cnn import train_cnn, evaluate_cnn
@@ -31,11 +31,19 @@ def main():
                                    holdout_fraction=0.2,
                                    block_size_km=cfg.split.block_size_km,
                                    seed=cfg.split.seed)
-    train_loader = DataLoader(PVPatchDataset(patches[~stop_mask], labels[~stop_mask]),
-                              batch_size=32, shuffle=True)
-    stop_loader = DataLoader(PVPatchDataset(patches[stop_mask], labels[stop_mask]),
-                             batch_size=32, shuffle=False)
-    val_loader = DataLoader(PVPatchDataset(val_patches, val_labels), batch_size=32, shuffle=False)
+    # Normalisation statistics come from the fitting patches only and are then
+    # applied unchanged to every split, so no val/test statistic reaches the model.
+    mean, std = compute_channel_stats(patches[~stop_mask])
+    train_loader = DataLoader(
+        PVPatchDataset(patches[~stop_mask], labels[~stop_mask], mean=mean, std=std,
+                       augment=True, seed=cfg.split.seed),
+        batch_size=32, shuffle=True)
+    stop_loader = DataLoader(
+        PVPatchDataset(patches[stop_mask], labels[stop_mask], mean=mean, std=std),
+        batch_size=32, shuffle=False)
+    val_loader = DataLoader(
+        PVPatchDataset(val_patches, val_labels, mean=mean, std=std),
+        batch_size=32, shuffle=False)
     print(f"Fitting on {(~stop_mask).sum()} patches, stopping on {stop_mask.sum()}, "
           f"scoring on {len(val_labels)}")
 

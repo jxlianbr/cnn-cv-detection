@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from src.config import XGBoostConfig
 from src.models.xgboost_baseline import train_baseline, predict_proba, FEATURE_COLUMNS
-from src.data.patch_dataset import PVPatchDataset
+from src.data.patch_dataset import PVPatchDataset, compute_channel_stats
 from src.data.split import block_holdout_mask
 from src.models.cnn import PVPatchCNN
 from src.models.train_cnn import train_cnn, evaluate_cnn
@@ -49,9 +49,6 @@ def run_label_efficiency_curve(train_df, train_patches, train_labels,
     n_total = len(train_df)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     val_true = (val_df["label"] == "pv").astype(int).values
-    val_loader = DataLoader(
-        PVPatchDataset(val_patches, val_labels), batch_size=16, shuffle=False
-    )
     rows = []
 
     for fraction in fractions:
@@ -78,12 +75,20 @@ def run_label_efficiency_curve(train_df, train_patches, train_labels,
                 block_size_km=EARLY_STOP_BLOCK_KM, seed=seed + repeat)
             fit_idx, stop_idx = idx[~stop_mask], idx[stop_mask]
 
+            # stats from this repeat's fitting patches only
+            mean, std = compute_channel_stats(train_patches[fit_idx])
             train_loader = DataLoader(
-                PVPatchDataset(train_patches[fit_idx], train_labels[fit_idx]),
+                PVPatchDataset(train_patches[fit_idx], train_labels[fit_idx],
+                               mean=mean, std=std, augment=True, seed=seed + repeat),
                 batch_size=16, shuffle=True,
             )
             stop_loader = DataLoader(
-                PVPatchDataset(train_patches[stop_idx], train_labels[stop_idx]),
+                PVPatchDataset(train_patches[stop_idx], train_labels[stop_idx],
+                               mean=mean, std=std),
+                batch_size=16, shuffle=False,
+            )
+            val_loader = DataLoader(
+                PVPatchDataset(val_patches, val_labels, mean=mean, std=std),
                 batch_size=16, shuffle=False,
             )
             cnn_model = PVPatchCNN(in_channels=train_patches.shape[1],

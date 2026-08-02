@@ -37,6 +37,26 @@ def attach_pv_polygon_area(points_gdf: gpd.GeoDataFrame, pv_gdf: gpd.GeoDataFram
     return out
 
 
+def capacity_bin_masks(eval_df: pd.DataFrame, edges_kw: list[float],
+                       kw_per_m2: float = DEFAULT_KW_PER_M2) -> dict[str, np.ndarray]:
+    """Boolean masks for consecutive capacity intervals [edge_i, edge_i+1).
+
+    Lets detection rate be plotted against installation size, which is the
+    empirical form of the question "is small-PV detection a method problem or a
+    resolution problem?". Points with no footprint belong to no bin.
+    """
+    area = eval_df["polygon_area_m2"].to_numpy(dtype=float)
+    sized = ~np.isnan(area)
+    capacity_kw = np.full(len(eval_df), np.nan)
+    capacity_kw[sized] = estimate_capacity_kw(area[sized], kw_per_m2)
+
+    masks = {}
+    for low, high in zip(edges_kw[:-1], edges_kw[1:]):
+        name = f"{low:g}-{high:g}kW" if np.isfinite(high) else f">{low:g}kW"
+        masks[name] = sized & (capacity_kw >= low) & (capacity_kw < high)
+    return masks
+
+
 def evaluate_on_subsets(y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray,
                         subsets: dict[str, np.ndarray]) -> pd.DataFrame:
     """Metrics for each named boolean subset. Empty subsets are skipped rather
@@ -62,6 +82,41 @@ def flag_sub_50kw(polygons_gdf: gpd.GeoDataFrame, kw_per_m2: float = DEFAULT_KW_
     areas_m2 = polygons_gdf.geometry.area.values
     capacity_kw = estimate_capacity_kw(areas_m2, kw_per_m2)
     return pd.Series(capacity_kw < 50.0, index=polygons_gdf.index)
+
+
+ANNOTATION_COLUMNS = ["non_crystalline_silicon", "spectrally_ambiguous"]
+
+
+def stratified_annotation_sample(points_df: pd.DataFrame, n_per_bin: int,
+                                 edges_kw: list[float],
+                                 kw_per_m2: float = DEFAULT_KW_PER_M2,
+                                 seed: int = 0) -> pd.DataFrame:
+    """Draw an equal-per-capacity-bin sample for manual annotation.
+
+    Uniform random sampling is useless here: small installations are ~0.1% of
+    the pool, so a hand-annotatable sample of a few hundred points would
+    contain almost none of exactly the stratum the research question is about.
+    Taking a fixed quota per bin oversamples the rare small end on purpose.
+
+    Returns the points with blank ANNOTATION_COLUMNS for a human to fill in;
+    the completed file is what `load_manual_failure_flags` reads back.
+    """
+    masks = capacity_bin_masks(points_df, edges_kw, kw_per_m2)
+    rng = np.random.default_rng(seed)
+
+    area = points_df["polygon_area_m2"].to_numpy(dtype=float)
+    chosen = []
+    for mask in masks.values():
+        positions = np.flatnonzero(mask)
+        if len(positions) > n_per_bin:
+            positions = rng.choice(positions, size=n_per_bin, replace=False)
+        chosen.extend(sorted(positions))
+
+    sample = points_df.iloc[chosen].copy()
+    sample["estimated_kw"] = estimate_capacity_kw(area[chosen], kw_per_m2)
+    for column in ANNOTATION_COLUMNS:
+        sample[column] = pd.NA
+    return sample.reset_index(drop=True)
 
 
 def load_manual_failure_flags(csv_path) -> pd.DataFrame:

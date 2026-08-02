@@ -6,8 +6,115 @@ from shapely.geometry import box
 from shapely.geometry import Point
 from src.evaluation.failure_cases import (
     estimate_capacity_kw, flag_sub_50kw, load_manual_failure_flags,
-    attach_pv_polygon_area, evaluate_on_subsets,
+    attach_pv_polygon_area, evaluate_on_subsets, capacity_bin_masks,
+    stratified_annotation_sample, ANNOTATION_COLUMNS,
 )
+
+
+def _annotation_pool(n_small=3, n_large=200):
+    # small: 400 m2 -> 60 kW; large: 20000 m2 -> 3000 kW
+    areas = [400.0] * n_small + [20000.0] * n_large
+    n = len(areas)
+    return pd.DataFrame({
+        "point_id": np.arange(n),
+        "label": ["pv"] * n,
+        "polygon_area_m2": areas,
+        "lon": np.linspace(139.0, 140.0, n),
+        "lat": np.linspace(35.0, 36.0, n),
+    })
+
+
+def test_stratified_annotation_sample_oversamples_the_rare_small_bin():
+    # random sampling would return ~1.5% small; stratification must do better
+    pool = _annotation_pool()
+
+    sample = stratified_annotation_sample(
+        pool, n_per_bin=3, edges_kw=[0, 100, np.inf], kw_per_m2=0.15, seed=0)
+
+    small = sample[sample["estimated_kw"] < 100]
+    assert len(small) == 3
+    assert len(sample) == 6
+
+
+def test_stratified_annotation_sample_takes_all_of_an_underfull_bin():
+    pool = _annotation_pool(n_small=2)
+
+    sample = stratified_annotation_sample(
+        pool, n_per_bin=10, edges_kw=[0, 100, np.inf], kw_per_m2=0.15, seed=0)
+
+    assert (sample["estimated_kw"] < 100).sum() == 2
+
+
+def test_stratified_annotation_sample_emits_blank_annotation_columns():
+    sample = stratified_annotation_sample(
+        _annotation_pool(), n_per_bin=2, edges_kw=[0, 100, np.inf],
+        kw_per_m2=0.15, seed=0)
+
+    for column in ANNOTATION_COLUMNS:
+        assert column in sample.columns
+    assert sample["non_crystalline_silicon"].isna().all()
+
+
+def test_stratified_annotation_sample_carries_coordinates_for_inspection():
+    sample = stratified_annotation_sample(
+        _annotation_pool(), n_per_bin=2, edges_kw=[0, 100, np.inf],
+        kw_per_m2=0.15, seed=0)
+    assert {"lon", "lat", "point_id"}.issubset(sample.columns)
+
+
+def test_stratified_annotation_sample_is_deterministic_given_seed():
+    kwargs = dict(n_per_bin=2, edges_kw=[0, 100, np.inf], kw_per_m2=0.15, seed=4)
+    a = stratified_annotation_sample(_annotation_pool(), **kwargs)
+    b = stratified_annotation_sample(_annotation_pool(), **kwargs)
+    assert a["point_id"].tolist() == b["point_id"].tolist()
+
+
+def test_stratified_annotation_sample_skips_points_with_no_footprint():
+    pool = _annotation_pool(n_small=2, n_large=2)
+    pool.loc[0, "polygon_area_m2"] = np.nan
+
+    sample = stratified_annotation_sample(
+        pool, n_per_bin=10, edges_kw=[0, 100, np.inf], kw_per_m2=0.15, seed=0)
+
+    assert 0 not in sample["point_id"].tolist()
+
+
+def _sized_df():
+    # at 0.15 kW/m^2: 400 m2 -> 60 kW, 2000 -> 300 kW, 20000 -> 3000 kW
+    return pd.DataFrame({
+        "point_id": [0, 1, 2, 3],
+        "label": ["pv", "pv", "pv", "non_pv"],
+        "polygon_area_m2": [400.0, 2000.0, 20000.0, np.nan],
+    })
+
+
+def test_capacity_bin_masks_produces_one_mask_per_interval():
+    masks = capacity_bin_masks(_sized_df(), edges_kw=[0, 100, 1000, np.inf],
+                               kw_per_m2=0.15)
+    assert len(masks) == 3
+
+
+def test_capacity_bin_masks_places_each_sized_point_in_exactly_one_bin():
+    masks = capacity_bin_masks(_sized_df(), edges_kw=[0, 100, 1000, np.inf],
+                               kw_per_m2=0.15)
+    stacked = np.vstack(list(masks.values()))
+    assert stacked[:, 0].sum() == 1  # 60 kW
+    assert stacked[:, 1].sum() == 1  # 300 kW
+    assert stacked[:, 2].sum() == 1  # 3000 kW
+
+
+def test_capacity_bin_masks_excludes_points_with_no_footprint():
+    masks = capacity_bin_masks(_sized_df(), edges_kw=[0, 100, 1000, np.inf],
+                               kw_per_m2=0.15)
+    stacked = np.vstack(list(masks.values()))
+    assert stacked[:, 3].sum() == 0  # the NaN-area non-PV point
+
+
+def test_capacity_bin_masks_assigns_by_capacity_not_row_order():
+    masks = capacity_bin_masks(_sized_df(), edges_kw=[0, 100, 1000, np.inf],
+                               kw_per_m2=0.15)
+    lowest = masks[next(iter(masks))]
+    assert lowest.tolist() == [True, False, False, False]
 
 
 def _pv_polygons():

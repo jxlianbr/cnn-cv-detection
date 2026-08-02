@@ -28,7 +28,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config import load_config
-from src.data.patch_dataset import PVPatchDataset
+from src.data.patch_dataset import PVPatchDataset, compute_channel_stats
 from src.data.split import block_holdout_mask
 from src.evaluation.failure_cases import (
     DEFAULT_KW_PER_M2, estimate_capacity_kw, evaluate_on_subsets,
@@ -71,22 +71,26 @@ def _train_cnn_on_split(train_df, train_patches, train_labels, cfg, device):
                                    holdout_fraction=0.2,
                                    block_size_km=cfg.split.block_size_km,
                                    seed=cfg.split.seed)
+    mean, std = compute_channel_stats(train_patches[~stop_mask])
     fit_loader = DataLoader(
-        PVPatchDataset(train_patches[~stop_mask], train_labels[~stop_mask]),
+        PVPatchDataset(train_patches[~stop_mask], train_labels[~stop_mask],
+                       mean=mean, std=std, augment=True, seed=cfg.split.seed),
         batch_size=32, shuffle=True)
     stop_loader = DataLoader(
-        PVPatchDataset(train_patches[stop_mask], train_labels[stop_mask]),
+        PVPatchDataset(train_patches[stop_mask], train_labels[stop_mask],
+                       mean=mean, std=std),
         batch_size=32, shuffle=False)
     model = PVPatchCNN(in_channels=train_patches.shape[1],
                        input_size=train_patches.shape[2])
     history = train_cnn(model, fit_loader, stop_loader, epochs=200, lr=1e-3,
                         device=device, patience=15)
     print(f"  CNN stopped after {len(history['val_loss'])} epochs")
-    return model
+    return model, mean, std
 
 
-def _cnn_probabilities(model, patches, labels, device) -> np.ndarray:
-    loader = DataLoader(PVPatchDataset(patches, labels), batch_size=32, shuffle=False)
+def _cnn_probabilities(model, patches, labels, device, mean, std) -> np.ndarray:
+    loader = DataLoader(PVPatchDataset(patches, labels, mean=mean, std=std),
+                        batch_size=32, shuffle=False)
     model.to(device).eval()
     out = []
     with torch.no_grad():
@@ -135,8 +139,9 @@ def main():
     baseline_proba = predict_proba(baseline, eval_df)
 
     print("Training CNN...")
-    cnn = _train_cnn_on_split(train_df, train_patches, train_labels, cfg, device)
-    cnn_proba = _cnn_probabilities(cnn, eval_patches, eval_labels, device)
+    cnn, mean, std = _train_cnn_on_split(train_df, train_patches, train_labels,
+                                         cfg, device)
+    cnn_proba = _cnn_probabilities(cnn, eval_patches, eval_labels, device, mean, std)
 
     masks = build_subset_masks(eval_df, args.kw_per_m2, manual_flags)
     frames = []
