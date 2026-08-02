@@ -16,12 +16,13 @@ sampling:
 patch:
   size_px: 21
 aoi:
-  # Pilot region: northern Kanto plain. Chosen empirically -- 8398 of the
-  # 104471 released PV polygons have centroids inside it, so the pv stratum is
-  # well populated without committing to the full Japan bbox
-  # ([129.0, 31.0, 146.0, 46.0]), which is ~600 GB of imagery at 10 m.
-  name: "kanto_pilot"
-  bbox: [139.5, 35.8, 140.5, 36.5]
+  # Full Japan, matching plan.md's stated AOI. Imagery is never materialised
+  # AOI-wide (that would be ~600 GB at 10 m) -- only one small GeoTIFF per
+  # sampling square, so cost scales with sampling.n_sampling_squares.
+  # The Kanto pilot used for pipeline validation was
+  # name "kanto_pilot", bbox [139.5, 35.8, 140.5, 36.5] (8411 polygons).
+  name: "japan"
+  bbox: [129.0, 31.0, 146.0, 46.0]
 split:
   # both are shares of the whole sample, i.e. roughly a 60/20/20 partition
   test_fraction: 0.2   # held out entirely; not read by the training scripts
