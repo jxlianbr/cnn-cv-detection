@@ -1,4 +1,6 @@
 """Training and evaluation loop for PVPatchCNN."""
+import copy
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,11 +9,24 @@ from src.evaluation.metrics import compute_metrics
 
 
 def train_cnn(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader,
-              epochs: int, lr: float, device: str) -> dict:
+              epochs: int, lr: float, device: str,
+              patience: int | None = None) -> dict:
+    """Train for `epochs`, or until val loss has failed to improve for
+    `patience` consecutive epochs.
+
+    With `patience` set, `epochs` becomes a ceiling rather than a fixed budget,
+    and the model is left holding its best-val-loss weights instead of whatever
+    the final epoch produced. A fixed budget has to be right for every training
+    set size at once, which it cannot be: the same 20 epochs that overfit the
+    full sample leave a 10% subset badly undertrained.
+    """
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     history = {"train_loss": [], "val_loss": []}
+    best_val_loss = float("inf")
+    best_state = None
+    epochs_without_improvement = 0
 
     for _ in range(epochs):
         model.train()
@@ -33,8 +48,22 @@ def train_cnn(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader
                 x, y = x.to(device), y.to(device)
                 logits = model(x)
                 val_loss += criterion(logits, y).item() * x.size(0)
-        history["val_loss"].append(val_loss / len(val_loader.dataset))
+        epoch_val_loss = val_loss / len(val_loader.dataset)
+        history["val_loss"].append(epoch_val_loss)
 
+        if patience is None:
+            continue
+        if epoch_val_loss < best_val_loss:
+            best_val_loss = epoch_val_loss
+            best_state = copy.deepcopy(model.state_dict())
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
     return history
 
 

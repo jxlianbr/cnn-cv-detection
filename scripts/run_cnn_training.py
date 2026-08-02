@@ -27,11 +27,15 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = PVPatchCNN(in_channels=len(cfg.sentinel2.bands), input_size=cfg.patch.size_px)
-    history = train_cnn(model, train_loader, val_loader, epochs=30, lr=1e-3, device=device)
+    # epochs is a ceiling; early stopping picks the budget and leaves the
+    # best-val-loss weights in the model rather than the last epoch's
+    history = train_cnn(model, train_loader, val_loader, epochs=200, lr=1e-3,
+                        device=device, patience=15)
     metrics = evaluate_cnn(model, val_loader, device=device)
 
+    print(f"Stopped after {len(history['val_loss'])} epochs")
     print("Final train loss:", history["train_loss"][-1])
-    print("Final val loss:", history["val_loss"][-1])
+    print("Best val loss:", min(history["val_loss"]))
     print("Validation metrics:", metrics)
     Path("results/logs").mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), "results/logs/pv_patch_cnn.pt")

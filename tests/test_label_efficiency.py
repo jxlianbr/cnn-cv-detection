@@ -1,7 +1,34 @@
 import numpy as np
 import pandas as pd
 from src.config import XGBoostConfig
-from scripts.run_label_efficiency import run_label_efficiency_curve
+from scripts.run_label_efficiency import (
+    run_label_efficiency_curve, subset_indices_for_repeats,
+)
+
+
+def test_subset_indices_have_the_requested_size():
+    subsets = subset_indices_for_repeats(n_total=200, fraction=0.25, seed=0, n_repeats=3)
+    assert len(subsets) == 3
+    assert all(len(s) == 50 for s in subsets)
+
+
+def test_subset_indices_differ_between_repeats():
+    # repeats that all drew the same subset would report zero spread and the
+    # averaging would be measuring nothing
+    subsets = subset_indices_for_repeats(n_total=200, fraction=0.25, seed=0, n_repeats=3)
+    assert set(subsets[0]) != set(subsets[1])
+    assert set(subsets[1]) != set(subsets[2])
+
+
+def test_subset_indices_are_reproducible_for_the_same_seed():
+    a = subset_indices_for_repeats(n_total=200, fraction=0.25, seed=7, n_repeats=2)
+    b = subset_indices_for_repeats(n_total=200, fraction=0.25, seed=7, n_repeats=2)
+    assert [s.tolist() for s in a] == [s.tolist() for s in b]
+
+
+def test_subset_indices_never_sample_the_same_point_twice():
+    subsets = subset_indices_for_repeats(n_total=50, fraction=1.0, seed=0, n_repeats=2)
+    assert all(len(set(s)) == len(s) for s in subsets)
 
 
 def _synthetic_baseline_df(n, seed):
@@ -42,3 +69,20 @@ def test_run_label_efficiency_curve_covers_all_fractions_and_models():
     assert set(result["model"]) == {"xgboost_baseline", "cnn"}
     assert {"overall_accuracy", "f1"}.issubset(result.columns)
     assert len(result) == 4  # 2 fractions x 2 models
+
+
+def test_run_label_efficiency_curve_produces_one_row_per_fraction_model_and_repeat():
+    train_df = _synthetic_baseline_df(200, seed=0)
+    val_df = _synthetic_baseline_df(80, seed=1)
+    train_patches, train_labels = _synthetic_patches(200, seed=0)
+    val_patches, val_labels = _synthetic_patches(80, seed=1)
+    cfg = XGBoostConfig(max_depth=3, eta=0.2, n_estimators=10)
+
+    result = run_label_efficiency_curve(
+        train_df, train_patches, train_labels,
+        val_df, val_patches, val_labels,
+        fractions=[0.5, 1.0], cfg=cfg, cnn_epochs=2, n_repeats=3,
+    )
+
+    assert len(result) == 12  # 2 fractions x 2 models x 3 repeats
+    assert sorted(result["repeat"].unique()) == [0, 1, 2]
