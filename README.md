@@ -12,18 +12,24 @@ on the same Sentinel-2 data, and compares the two.
 
 ## Results
 
-Japan-wide sample of 11,703 points from 955 sampling squares, evaluated once on
-a spatially blocked, held-out test split of 2,136 points:
+Japan-wide sample of 11,703 points from 955 sampling squares, evaluated on a
+spatially blocked, held-out test split of 2,136 points. XGBoost is deterministic
+and trained once; the CNN is trained with five seeds (mean +- sd):
 
 | model | OA | recall | F1 |
 |---|---|---|---|
 | XGBoost + spectral indices | 0.967 | 0.958 | 0.965 |
-| CNN (6-band, 21x21 patches) | **0.977** | **0.969** | **0.975** |
+| CNN (6-band, 21x21 patches) | **0.980 +- 0.001** | **0.979 +- 0.005** | **0.979 +- 0.001** |
 
-Both models degrade sharply on the smallest installations (recall 0.72-0.83
-below 100 kW, versus ~0.99 above 1000 kW). Which of the two handles small sites
-better is *not* resolvable at this sample size -- the per-size-bin ordering does
-not replicate between validation and test.
+The difference holds up in every run: an exact McNemar test on the points where
+the two models disagree gives p between 0.001 and 0.010 for each of the five
+CNN seeds (48-56 points only the CNN gets right, against 20-28 for XGBoost).
+
+The gain is *not* where the spectral method is known to struggle. About four
+fifths of the CNN's extra detections are installations above 1 MW. Both models
+degrade on the smallest installations (recall 0.79-0.83 below 100 kW on test,
+versus ~0.99 above 1000 kW), and below 1 MW which model is ahead depends on the
+size bin and does not replicate between validation and test.
 
 ### Caveats worth reading before reusing these numbers
 
@@ -33,7 +39,7 @@ not replicate between validation and test.
   construction, so this measures *agreement with that map*, not absolute
   accuracy. The CNN's edge is plausibly it learning end-to-end what the original
   pipeline did with hand-built morphological post-processing.
-- **The sub-50 kW failure case cannot be studied from this data.** Only 168 of
+- **The sub-50 kW failure case cannot be studied from this data.** Only 171 of
   104,471 released polygons fall under 333 m^2 (~50 kW at 0.15 kW/m^2). An
   independent label source is required -- `scripts/make_annotation_sample.py`
   produces a worksheet that deliberately oversamples small installations.
@@ -73,10 +79,18 @@ python scripts/download_pv_polygons.py       # fetch the Zenodo polygon release
 python scripts/build_dataset.py              # GEE -> data/processed/ (slow: ~1000 downloads)
 python scripts/run_cnn_training.py           # train + evaluate the CNN
 python scripts/run_label_efficiency.py --repeats 5
-python scripts/run_failure_case_evaluation.py --split val
-python scripts/run_size_detectability.py --split val
+python scripts/run_failure_case_evaluation.py --split val --repeats 5
+python scripts/run_failure_case_evaluation.py --split test --repeats 5
+python scripts/make_figures.py               # figures + LaTeX tables from results/logs/
 python scripts/make_annotation_sample.py     # worksheet for manual annotation
 ```
+
+`run_failure_case_evaluation.py` trains XGBoost once and the CNN once per seed,
+then writes per-point predictions (`results/logs/predictions_<split>.parquet`),
+metrics per seed and McNemar tests (`results/logs/mcnemar_<split>.csv`).
+`make_figures.py` derives the size-bin analysis from those saved predictions, so
+it retrains nothing. (`run_size_detectability.py` is the older, single-run
+version of that analysis.)
 
 Validate the chain on a small region before committing to a full run:
 
@@ -96,7 +110,7 @@ src/
   evaluation/  metrics, failure-case stratification
 scripts/       entry points (see Running)
 configs/       experiment configuration
-tests/         107 tests
+tests/         110 tests
 data/          gitignored; reproducible from the scripts
 results/       gitignored; figures and logs
 ```

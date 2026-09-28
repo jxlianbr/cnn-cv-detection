@@ -55,3 +55,31 @@ def test_compute_metrics_matches_published_baseline_ballpark():
                        rng.uniform(0.0, 0.4, len(y_true)))
     m = compute_metrics(y_true, y_pred, y_proba)
     assert m["overall_accuracy"] > 0.95
+
+
+def test_mcnemar_counts_discordant_pairs_in_each_direction():
+    from src.evaluation.metrics import mcnemar_test
+    y_true = np.array([1, 1, 1, 0, 0, 0])
+    pred_a = np.array([1, 1, 0, 0, 1, 0])  # wrong on 2 and 4
+    pred_b = np.array([1, 0, 1, 0, 0, 0])  # wrong on 1
+    r = mcnemar_test(y_true, pred_a, pred_b)
+    assert r["a_only_correct"] == 1   # point 1
+    assert r["b_only_correct"] == 2   # points 2 and 4
+
+
+def test_mcnemar_identical_predictions_give_p_of_one():
+    from src.evaluation.metrics import mcnemar_test
+    y = np.array([1, 0, 1, 0])
+    r = mcnemar_test(y, y, y)
+    assert r["a_only_correct"] == r["b_only_correct"] == 0
+    assert r["p_value"] == 1.0
+
+
+def test_mcnemar_uses_the_exact_two_sided_binomial():
+    from src.evaluation.metrics import mcnemar_test
+    # 3 vs 10 discordant pairs: p = 2 * P(X <= 3), X ~ Bin(13, 0.5) = 2 * 378 / 8192
+    y_true = np.ones(13, dtype=int)
+    pred_a = np.array([1] * 3 + [0] * 10)
+    pred_b = np.array([0] * 3 + [1] * 10)
+    r = mcnemar_test(y_true, pred_a, pred_b)
+    assert np.isclose(r["p_value"], 2 * 378 / 8192)

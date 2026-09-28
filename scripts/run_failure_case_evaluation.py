@@ -34,6 +34,7 @@ from src.evaluation.failure_cases import (
     DEFAULT_KW_PER_M2, estimate_capacity_kw, evaluate_on_subsets,
     load_manual_failure_flags,
 )
+from src.evaluation.metrics import mcnemar_test
 from src.models.cnn import PVPatchCNN
 from src.models.train_cnn import train_cnn
 from src.models.xgboost_baseline import predict_proba, train_baseline
@@ -66,16 +67,25 @@ def build_subset_masks(eval_df: pd.DataFrame, kw_per_m2: float,
     return masks
 
 
-def _train_cnn_on_split(train_df, train_patches, train_labels, cfg, device):
+def _train_cnn_on_split(train_df, train_patches, train_labels, cfg, device,
+                        seed: int | None = None):
+    """`seed` fixes weight init, batch order and augmentation, so repeats differ
+    only in training stochasticity. The early-stopping slice stays the same
+    across repeats. None keeps the old unseeded behaviour."""
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
     stop_mask = block_holdout_mask(train_df["lon"].values, train_df["lat"].values,
                                    holdout_fraction=0.2,
                                    block_size_km=cfg.split.block_size_km,
                                    seed=cfg.split.seed)
     mean, std = compute_channel_stats(train_patches[~stop_mask])
+    generator = torch.Generator().manual_seed(seed) if seed is not None else None
     fit_loader = DataLoader(
         PVPatchDataset(train_patches[~stop_mask], train_labels[~stop_mask],
-                       mean=mean, std=std, augment=True, seed=cfg.split.seed),
-        batch_size=32, shuffle=True)
+                       mean=mean, std=std, augment=True,
+                       seed=cfg.split.seed if seed is None else seed),
+        batch_size=32, shuffle=True, generator=generator)
     stop_loader = DataLoader(
         PVPatchDataset(train_patches[stop_mask], train_labels[stop_mask],
                        mean=mean, std=std),
@@ -105,6 +115,9 @@ def main():
     parser.add_argument("--split", choices=["val", "test"], default="val")
     parser.add_argument("--manual-flags", default="data/external/manual_failure_flags.csv")
     parser.add_argument("--kw-per-m2", type=float, default=DEFAULT_KW_PER_M2)
+    parser.add_argument("--repeats", type=int, default=5,
+                        help="CNN training runs with seeds 0..N-1; the baseline "
+                             "is deterministic and trained once")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -138,28 +151,54 @@ def main():
     baseline = train_baseline(train_df, cfg.xgboost)
     baseline_proba = predict_proba(baseline, eval_df)
 
-    print("Training CNN...")
-    cnn, mean, std = _train_cnn_on_split(train_df, train_patches, train_labels,
-                                         cfg, device)
-    cnn_proba = _cnn_probabilities(cnn, eval_patches, eval_labels, device, mean, std)
-
     masks = build_subset_masks(eval_df, args.kw_per_m2, manual_flags)
-    frames = []
-    for name, proba in (("xgboost_baseline", baseline_proba), ("cnn", cnn_proba)):
-        report = evaluate_on_subsets(y_true, (proba >= 0.5).astype(int), proba, masks)
-        report.insert(0, "model", name)
-        frames.append(report)
-    result = pd.concat(frames, ignore_index=True)
+    baseline_pred = (baseline_proba >= 0.5).astype(int)
+    report = evaluate_on_subsets(y_true, baseline_pred, baseline_proba, masks)
+    report.insert(0, "repeat", 0)
+    report.insert(0, "model", "xgboost_baseline")
+    frames = [report]
 
-    Path("results/logs").mkdir(parents=True, exist_ok=True)
-    out_csv = Path("results/logs") / f"failure_case_comparison_{args.split}.csv"
+    # one row per evaluation point, so later analyses (paired tests, size bins)
+    # use exactly these runs instead of retraining
+    predictions = eval_df[["point_id", "label", "polygon_area_m2", "lon", "lat"]].copy()
+    predictions["xgboost_baseline_proba"] = baseline_proba
+    tests = []
+    for repeat in range(args.repeats):
+        print(f"Training CNN (seed {repeat})...")
+        cnn, mean, std = _train_cnn_on_split(train_df, train_patches, train_labels,
+                                             cfg, device, seed=repeat)
+        cnn_proba = _cnn_probabilities(cnn, eval_patches, eval_labels, device,
+                                       mean, std)
+        cnn_pred = (cnn_proba >= 0.5).astype(int)
+        predictions[f"cnn_proba_seed{repeat}"] = cnn_proba
+        report = evaluate_on_subsets(y_true, cnn_pred, cnn_proba, masks)
+        report.insert(0, "repeat", repeat)
+        report.insert(0, "model", "cnn")
+        frames.append(report)
+        test = mcnemar_test(y_true, baseline_pred, cnn_pred)
+        tests.append({"repeat": repeat,
+                      "xgboost_only_correct": test["a_only_correct"],
+                      "cnn_only_correct": test["b_only_correct"],
+                      "p_value": test["p_value"]})
+    result = pd.concat(frames, ignore_index=True)
+    tests = pd.DataFrame(tests)
+
+    logs = Path("results/logs")
+    logs.mkdir(parents=True, exist_ok=True)
+    out_csv = logs / f"failure_case_comparison_{args.split}.csv"
     result.to_csv(out_csv, index=False)
+    predictions.to_parquet(logs / f"predictions_{args.split}.parquet", index=False)
+    tests.to_csv(logs / f"mcnemar_{args.split}.csv", index=False)
 
     with pd.option_context("display.width", 200, "display.max_columns", 30):
         print()
-        print(result[["subset", "model", "n", "n_pv", "overall_accuracy",
-                      "recall", "f1"]].round(3).to_string(index=False))
-    print(f"\nWrote {out_csv}")
+        print(result[result["subset"] == "all"][
+            ["model", "repeat", "n", "overall_accuracy", "precision", "recall",
+             "f1"]].round(4).to_string(index=False))
+        print("\nExact McNemar test, baseline vs CNN (same points)")
+        print(tests.to_string(index=False))
+    print(f"\nWrote {out_csv}, predictions_{args.split}.parquet and "
+          f"mcnemar_{args.split}.csv to {logs}/")
 
 
 if __name__ == "__main__":
