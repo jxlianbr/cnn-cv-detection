@@ -8,8 +8,9 @@ import geopandas as gpd
 
 from src.evaluation.metrics import compute_metrics
 
-DEFAULT_KW_PER_M2 = 0.15  # mid-range published capacity density for
-                          # crystalline-silicon ground-mount PV; approximation only
+DEFAULT_KW_PER_M2 = 0.086  # 0.86 MW/ha, the linear area-to-capacity fit Shimada &
+                           # Takeuchi (2025) derived from 50 Japanese solar farms and
+                           # used on this same polygon release (50 kW ~ 600 m^2 there)
 
 AREA_CRS = "EPSG:6933"  # equal-area; Japan spans several UTM zones, so a single
                         # UTM projection would bias areas at the edges

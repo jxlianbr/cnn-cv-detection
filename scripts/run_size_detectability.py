@@ -5,7 +5,7 @@ problem. If both a pixel-wise spectral classifier and a spatial CNN degrade
 together as installations shrink, the limit is the 10 m sensor, not the choice
 of method -- and no amount of spatial context recovers it.
 
-For scale: at 0.15 kW/m^2 a 50 kW installation is ~333 m^2, roughly 3 Sentinel-2
+For scale: at 0.086 kW/m^2 a 50 kW installation is ~580 m^2, roughly 6 Sentinel-2
 pixels. Recall is the metric of interest since every bin is PV-only.
 """
 import argparse
@@ -19,7 +19,8 @@ import pandas as pd
 import torch
 
 from src.config import load_config
-from src.evaluation.failure_cases import capacity_bin_masks, evaluate_on_subsets
+from src.evaluation.failure_cases import (DEFAULT_KW_PER_M2, capacity_bin_masks,
+                                          evaluate_on_subsets)
 from src.models.xgboost_baseline import predict_proba, train_baseline
 from scripts.run_failure_case_evaluation import _cnn_probabilities, _train_cnn_on_split
 
@@ -30,7 +31,7 @@ DEFAULT_EDGES = [0, 100, 250, 500, 1000, 2500, np.inf]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=["val", "test"], default="val")
-    parser.add_argument("--kw-per-m2", type=float, default=0.15)
+    parser.add_argument("--kw-per-m2", type=float, default=DEFAULT_KW_PER_M2)
     args = parser.parse_args()
 
     cfg = load_config()
