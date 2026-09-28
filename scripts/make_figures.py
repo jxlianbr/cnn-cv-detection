@@ -12,6 +12,7 @@ Also prints the Wilson intervals quoted in the text, so every number in the
 chapter can be traced back to a command.
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -111,7 +112,7 @@ def fig_size_distribution(out: Path):
             ha="right")
     ax.set_xscale("log")
     ax.set_xlim(10, 10**5.5)
-    ax.set_xlabel("Estimated capacity (kW, footprint × 0.15 kW/m²)")
+    ax.set_xlabel(f"Estimated capacity (kW, footprint × {DEFAULT_KW_PER_M2} kW/m²)")
     ax.set_ylabel("Share of items (%)")
     ax.legend(loc="upper right")
     fig.savefig(out / "fig_size_distribution.pdf")
@@ -246,7 +247,9 @@ PUBLISHED = {"overall_accuracy": 0.984, "precision": 0.999, "recall": 0.969,
 
 
 def _write(path: Path, lines: list[str]):
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # a leading hyphen before a number prints as a hyphen, not a minus sign
+    text = re.sub(r"(?<=[\s\[])-(?=\d)", "$-$", "\n".join(lines))
+    path.write_text(text + "\n", encoding="utf-8")
 
 
 def tab_replication(out: Path):
@@ -291,6 +294,59 @@ def tab_aggregate(out: Path):
               f"\\multicolumn{{2}}{{c}}{{{n[1]:,} ({n_pv[1]:,})}} \\\\",
               r"\bottomrule", r"\end{tabular}"]
     _write(out / "tab_aggregate.tex", lines)
+
+
+def tab_context_control(out: Path):
+    """From run_context_control.py: CNN against raw and 3x3-pooled XGBoost."""
+    df = pd.read_csv(LOGS / "context_control.csv")
+    t = df["threshold"].iloc[0]
+    order = [("test", "CNN vs raw XGBoost (t=0.5)", "Raw, per pixel", "0.50"),
+             ("test", f"CNN vs 3x3 pooled XGBoost (t={t})", "3$\\times$3 pooled", f"{t:.2f}$^{{a}}$"),
+             ("test", "CNN vs 3x3 pooled XGBoost (t=0.5)", "3$\\times$3 pooled", "0.50"),
+             ("val", "CNN vs raw XGBoost (t=0.5)", "Raw, per pixel", "0.50"),
+             ("val", "CNN vs 3x3 pooled XGBoost (t=0.5)", "3$\\times$3 pooled", "0.50")]
+    lines = [r"\begin{tabular}{llcccc}", r"\toprule",
+             r"Split & XGBoost variant & Threshold & Accuracy & CNN $-$ XGBoost (pp) & McNemar $p$ \\",
+             r"\midrule"]
+    for split, comparison, name, thr in order:
+        r = df[(df["split"] == split) & (df["comparison"] == comparison)].iloc[0]
+        p = (f"{r.p_min:.3f}--{r.p_max:.3f}" if r.p_min >= 0.001
+             else f"$<$0.001--{r.p_max:.3f}")
+        lines.append(f"{'Test' if split == 'test' else 'Validation'} & {name} & {thr} & "
+                     f"{r.baseline_accuracy:.3f} & {r.diff_pp:+.2f} [{r.ci_low_pp:+.2f}, "
+                     f"{r.ci_high_pp:+.2f}] & {p} \\\\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    _write(out / "tab_context_control.tex", lines)
+
+
+def tab_error_location(out: Path):
+    df = pd.read_csv(LOGS / "error_location.csv")
+    strata = df[df["stratum"].str.contains("edge|any PV") & df["n"].notna()
+                & ~df["stratum"].str.startswith("CNN-only")]
+    # the pooled threshold was tuned on val, so only the CNN is reported there
+    lines = [r"\begin{tabular}{lrcccrrr}", r"\toprule",
+             r"& \multicolumn{6}{c}{Test} & Validation \\",
+             r"\cmidrule(lr){2-7}\cmidrule(lr){8-8}",
+             r"& & \multicolumn{3}{c}{Accuracy} & \multicolumn{2}{c}{Net gain} & Net gain \\",
+             r"\cmidrule(lr){3-5}\cmidrule(lr){6-7}\cmidrule(lr){8-8}",
+             r"Location & $n$ & Raw & Pooled & CNN & Pooled & CNN & CNN \\",
+             r"\midrule"]
+    names = strata["stratum"].unique()
+    for name in names:
+        t = strata[(strata["split"] == "test") & (strata["stratum"] == name)].iloc[0]
+        v = strata[(strata["split"] == "val") & (strata["stratum"] == name)].iloc[0]
+        label = (name.replace(">=", "$\\geq$").replace("<=", "$\\leq$")
+                 .replace("< ", "$<$ ").replace("> ", "$>$ ").replace("20-50", "20--50"))
+        lines.append(f"{label} & {int(t.n):,} & {t.xgboost_accuracy:.3f} & {t.pooled_accuracy:.3f} & "
+                     f"{t.cnn_accuracy:.3f} & {t.pooled_net_gain:+.1f} & {t.cnn_net_gain:+.1f} & "
+                     f"{v.cnn_net_gain:+.1f} \\\\")
+    tot = {s: strata[strata["split"] == s][["pooled_net_gain", "cnn_net_gain"]].sum()
+           for s in ("test", "val")}
+    lines += [r"\midrule",
+              f"Total & & & & & {tot['test'].pooled_net_gain:+.1f} & {tot['test'].cnn_net_gain:+.1f} & "
+              f"{tot['val'].cnn_net_gain:+.1f} \\\\",
+              r"\bottomrule", r"\end{tabular}"]
+    _write(out / "tab_error_location.tex", lines)
 
 
 def tab_mcnemar(out: Path):
@@ -373,6 +429,8 @@ def main():
     tab_aggregate(tables)
     tab_size_recall(tables)
     tab_mcnemar(tables)
+    tab_context_control(tables)
+    tab_error_location(tables)
     tab_label_efficiency(tables)
     print_aggregate_intervals()
     print(f"Wrote figures to {out}/ and tables to {tables}/")

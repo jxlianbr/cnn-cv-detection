@@ -25,11 +25,12 @@ The difference holds up in every run: an exact McNemar test on the points where
 the two models disagree gives p between 0.001 and 0.010 for each of the five
 CNN seeds (48-56 points only the CNN gets right, against 20-28 for XGBoost).
 
-The gain is *not* where the spectral method is known to struggle. About four
-fifths of the CNN's extra detections are installations above 1 MW. Both models
-degrade on the smallest installations (recall 0.79-0.83 below 100 kW on test,
-versus ~0.99 above 1000 kW), and below 1 MW which model is ahead depends on the
-size bin and does not replicate between validation and test.
+The gain is *not* where the spectral method is known to struggle. Most of the
+CNN's extra detections are installations above 1 MW (83% on test, 59% on
+validation). Both models degrade on the smallest installations (recall
+0.87-0.90 below 100 kW, versus 0.96-1.00 above 1 MW), and below 100 kW neither
+model has a consistent edge. Between 100 kW and 1 MW the ordering depends on
+the size bin and partly on the split.
 
 ### Caveats worth reading before reusing these numbers
 
@@ -39,13 +40,16 @@ size bin and does not replicate between validation and test.
   construction, so this measures *agreement with that map*, not absolute
   accuracy. The CNN's edge is plausibly it learning end-to-end what the original
   pipeline did with hand-built morphological post-processing.
-- **The sub-50 kW failure case cannot be studied from this data.** Only 171 of
-  104,471 released polygons fall under 333 m^2 (~50 kW at 0.15 kW/m^2). An
-  independent label source is required -- `scripts/make_annotation_sample.py`
+- **The sub-50 kW failure case cannot be studied from this sample.** 12.7% of
+  the released polygons are under ~580 m^2 (~50 kW), but point sampling is
+  area-weighted, so only 39 of 5,990 sampled PV points fall in them (sampled
+  median installation ~9x the release median). A size-stratified sample or an
+  independent label source is needed -- `scripts/make_annotation_sample.py`
   produces a worksheet that deliberately oversamples small installations.
-- **Capacity is estimated from footprint area** at 0.15 kW/m^2, not measured.
-- Point sampling is area-weighted, biasing the sample toward large installations
-  (sampled median footprint ~9x the population median).
+- **Capacity is estimated from footprint area** at 0.086 kW/m^2 (0.86 MW/ha,
+  the conversion Shimada & Takeuchi fitted for this release), not measured.
+- **Many non-PV points are easy.** Buffer/urban sampling squares are drawn in
+  the bounding box of the populated buffer, so ~29% of non-PV points are water.
 
 ## Setup
 
@@ -81,6 +85,7 @@ python scripts/run_cnn_training.py           # train + evaluate the CNN
 python scripts/run_label_efficiency.py --repeats 5
 python scripts/run_failure_case_evaluation.py --split val --repeats 5
 python scripts/run_failure_case_evaluation.py --split test --repeats 5
+python scripts/run_context_control.py        # 3x3-pooled XGBoost control + error location
 python scripts/make_figures.py               # figures + LaTeX tables from results/logs/
 python scripts/make_annotation_sample.py     # worksheet for manual annotation
 ```
