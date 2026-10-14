@@ -31,7 +31,7 @@ from src.config import load_config
 from src.data.patch_dataset import PVPatchDataset, compute_channel_stats
 from src.data.split import block_holdout_mask
 from src.evaluation.failure_cases import (
-    DEFAULT_KW_PER_M2, estimate_capacity_kw, evaluate_on_subsets,
+    DEFAULT_KW_PER_M2, estimate_capacity_kw, evaluate_saved_predictions,
     load_manual_failure_flags,
 )
 from src.evaluation.metrics import mcnemar_test
@@ -110,6 +110,45 @@ def _cnn_probabilities(model, patches, labels, device, mean, std) -> np.ndarray:
     return np.concatenate(out)
 
 
+LOGS = Path("results/logs")
+
+
+def _output_paths(split: str, suffix: str) -> dict[str, Path]:
+    """`suffix` goes before the split, e.g. "_v2" -> failure_case_comparison_v2_val.csv."""
+    return {"comparison": LOGS / f"failure_case_comparison{suffix}_{split}.csv",
+            "predictions": LOGS / f"predictions{suffix}_{split}.parquet",
+            "mcnemar": LOGS / f"mcnemar{suffix}_{split}.csv"}
+
+
+def _refuse_overwrite(paths: list[Path], overwrite: bool):
+    existing = [str(p) for p in paths if p.exists()]
+    if existing and not overwrite:
+        raise SystemExit(f"Refusing to overwrite {', '.join(existing)}; pass --suffix "
+                         f"to write new files or --overwrite to replace them.")
+
+
+def _load_manual_flags(path_arg: str) -> pd.DataFrame | None:
+    manual_path = Path(path_arg)
+    if manual_path.exists():
+        manual_flags = load_manual_failure_flags(manual_path)
+        print(f"Loaded {len(manual_flags)} manual annotations from {manual_path}")
+        return manual_flags
+    print(f"No manual annotations at {manual_path}; reporting the "
+          f"area-based stratum only")
+    return None
+
+
+def _print_summary(result: pd.DataFrame):
+    with pd.option_context("display.width", 200, "display.max_columns", 30):
+        print()
+        print(result[result["subset"] == "all"][
+            ["model", "repeat", "n", "overall_accuracy", "precision", "recall",
+             "f1"]].round(4).to_string(index=False))
+        print("\nStrata, first run of each model")
+        print(result[result["repeat"] == 0][["model", "subset", "n", "n_pv", "recall"]]
+              .round(4).to_string(index=False))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=["val", "test"], default="val")
@@ -118,8 +157,33 @@ def main():
     parser.add_argument("--repeats", type=int, default=5,
                         help="CNN training runs with seeds 0..N-1; the baseline "
                              "is deterministic and trained once")
+    parser.add_argument("--from-predictions", action="store_true",
+                        help="retrain nothing: recompute the strata from the saved "
+                             "results/logs/predictions_<split>.parquet (the runs "
+                             "behind the paper) and write only the comparison CSV")
+    parser.add_argument("--suffix", default="",
+                        help='inserted before the split in output names, e.g. "_v2"')
+    parser.add_argument("--overwrite", action="store_true",
+                        help="allow replacing existing output files")
     args = parser.parse_args()
+    out = _output_paths(args.split, args.suffix)
 
+    if args.from_predictions:
+        _refuse_overwrite([out["comparison"]], args.overwrite)
+        source = LOGS / f"predictions_{args.split}.parquet"
+        predictions = pd.read_parquet(source)
+        print(f"Recomputing strata from {source} ({len(predictions)} points, "
+              f"{args.kw_per_m2} kW/m^2)")
+        masks = build_subset_masks(predictions, args.kw_per_m2,
+                                   _load_manual_flags(args.manual_flags))
+        result = evaluate_saved_predictions(predictions, masks)
+        LOGS.mkdir(parents=True, exist_ok=True)
+        result.to_csv(out["comparison"], index=False)
+        _print_summary(result)
+        print(f"\nWrote {out['comparison']}")
+        return
+
+    _refuse_overwrite(list(out.values()), args.overwrite)
     cfg = load_config()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -136,30 +200,16 @@ def main():
             "No polygon_area_m2 column -- rebuild the dataset with "
             "scripts/build_dataset.py so footprint areas are attached.")
 
-    manual_path = Path(args.manual_flags)
-    manual_flags = None
-    if manual_path.exists():
-        manual_flags = load_manual_failure_flags(manual_path)
-        print(f"Loaded {len(manual_flags)} manual annotations from {manual_path}")
-    else:
-        print(f"No manual annotations at {manual_path}; reporting the "
-              f"area-based stratum only")
-
+    manual_flags = _load_manual_flags(args.manual_flags)
     y_true = (eval_df["label"] == "pv").astype(int).values
 
     print("Training spectral baseline...")
     baseline = train_baseline(train_df, cfg.xgboost)
     baseline_proba = predict_proba(baseline, eval_df)
-
-    masks = build_subset_masks(eval_df, args.kw_per_m2, manual_flags)
     baseline_pred = (baseline_proba >= 0.5).astype(int)
-    report = evaluate_on_subsets(y_true, baseline_pred, baseline_proba, masks)
-    report.insert(0, "repeat", 0)
-    report.insert(0, "model", "xgboost_baseline")
-    frames = [report]
 
-    # one row per evaluation point, so later analyses (paired tests, size bins)
-    # use exactly these runs instead of retraining
+    # one row per evaluation point, so later analyses (paired tests, size bins,
+    # re-stratification with --from-predictions) use exactly these runs
     predictions = eval_df[["point_id", "label", "polygon_area_m2", "lon", "lat"]].copy()
     predictions["xgboost_baseline_proba"] = baseline_proba
     tests = []
@@ -169,36 +219,25 @@ def main():
                                              cfg, device, seed=repeat)
         cnn_proba = _cnn_probabilities(cnn, eval_patches, eval_labels, device,
                                        mean, std)
-        cnn_pred = (cnn_proba >= 0.5).astype(int)
         predictions[f"cnn_proba_seed{repeat}"] = cnn_proba
-        report = evaluate_on_subsets(y_true, cnn_pred, cnn_proba, masks)
-        report.insert(0, "repeat", repeat)
-        report.insert(0, "model", "cnn")
-        frames.append(report)
-        test = mcnemar_test(y_true, baseline_pred, cnn_pred)
+        test = mcnemar_test(y_true, baseline_pred, (cnn_proba >= 0.5).astype(int))
         tests.append({"repeat": repeat,
                       "xgboost_only_correct": test["a_only_correct"],
                       "cnn_only_correct": test["b_only_correct"],
                       "p_value": test["p_value"]})
-    result = pd.concat(frames, ignore_index=True)
+    masks = build_subset_masks(eval_df, args.kw_per_m2, manual_flags)
+    result = evaluate_saved_predictions(predictions, masks)
     tests = pd.DataFrame(tests)
 
-    logs = Path("results/logs")
-    logs.mkdir(parents=True, exist_ok=True)
-    out_csv = logs / f"failure_case_comparison_{args.split}.csv"
-    result.to_csv(out_csv, index=False)
-    predictions.to_parquet(logs / f"predictions_{args.split}.parquet", index=False)
-    tests.to_csv(logs / f"mcnemar_{args.split}.csv", index=False)
+    LOGS.mkdir(parents=True, exist_ok=True)
+    result.to_csv(out["comparison"], index=False)
+    predictions.to_parquet(out["predictions"], index=False)
+    tests.to_csv(out["mcnemar"], index=False)
 
-    with pd.option_context("display.width", 200, "display.max_columns", 30):
-        print()
-        print(result[result["subset"] == "all"][
-            ["model", "repeat", "n", "overall_accuracy", "precision", "recall",
-             "f1"]].round(4).to_string(index=False))
-        print("\nExact McNemar test, baseline vs CNN (same points)")
-        print(tests.to_string(index=False))
-    print(f"\nWrote {out_csv}, predictions_{args.split}.parquet and "
-          f"mcnemar_{args.split}.csv to {logs}/")
+    _print_summary(result)
+    print("\nExact McNemar test, baseline vs CNN (same points)")
+    print(tests.to_string(index=False))
+    print(f"\nWrote {', '.join(str(p) for p in out.values())}")
 
 
 if __name__ == "__main__":

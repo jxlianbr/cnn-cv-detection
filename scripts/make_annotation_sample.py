@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--n-per-bin", type=int, default=40)
     parser.add_argument("--kw-per-m2", type=float, default=DEFAULT_KW_PER_M2)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out", default="data/external/annotation_worksheet.csv")
+    parser.add_argument("--out", default="data/external/annotation_worksheet_v2.csv")
     args = parser.parse_args()
 
     frames = []

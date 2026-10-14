@@ -95,7 +95,9 @@ then writes per-point predictions (`results/logs/predictions_<split>.parquet`),
 metrics per seed and McNemar tests (`results/logs/mcnemar_<split>.csv`).
 `make_figures.py` derives the size-bin analysis from those saved predictions, so
 it retrains nothing. (`run_size_detectability.py` is the older, single-run
-version of that analysis.)
+version of that analysis; with `--from-predictions` it bins the same saved runs
+instead of retraining.) Both experiment scripts refuse to overwrite existing
+logs: pass `--suffix _v2` to write new files, or `--overwrite`.
 
 Validate the chain on a small region before committing to a full run:
 

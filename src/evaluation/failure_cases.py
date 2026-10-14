@@ -73,6 +73,34 @@ def evaluate_on_subsets(y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndar
     return pd.DataFrame(rows)
 
 
+def evaluate_saved_predictions(predictions: pd.DataFrame,
+                               subsets: dict[str, np.ndarray],
+                               threshold: float = 0.5) -> pd.DataFrame:
+    """Subset metrics for every model run stored in a predictions frame.
+
+    `predictions` is the per-point file run_failure_case_evaluation.py writes:
+    a `label` column, `xgboost_baseline_proba`, and one `cnn_proba_seed<k>`
+    column per CNN run. Recomputing strata from it changes how points are
+    grouped without retraining, so the runs behind the paper stay the same.
+    Rows: the baseline (repeat 0), then the CNN seeds in order.
+    """
+    y_true = (predictions["label"] == "pv").astype(int).to_numpy()
+    runs = [("xgboost_baseline", 0, "xgboost_baseline_proba")]
+    seed_cols = sorted((c for c in predictions.columns if c.startswith("cnn_proba_seed")),
+                       key=lambda c: int(c.removeprefix("cnn_proba_seed")))
+    runs += [("cnn", int(c.removeprefix("cnn_proba_seed")), c) for c in seed_cols]
+
+    frames = []
+    for model, repeat, column in runs:
+        proba = predictions[column].to_numpy(dtype=float)
+        report = evaluate_on_subsets(y_true, (proba >= threshold).astype(int), proba,
+                                     subsets)
+        report.insert(0, "repeat", repeat)
+        report.insert(0, "model", model)
+        frames.append(report)
+    return pd.concat(frames, ignore_index=True)
+
+
 def estimate_capacity_kw(polygon_area_m2: np.ndarray, kw_per_m2: float = DEFAULT_KW_PER_M2
                          ) -> np.ndarray:
     return polygon_area_m2 * kw_per_m2
